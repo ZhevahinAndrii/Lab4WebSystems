@@ -56,7 +56,7 @@ jobs:
         run: |
           python manage.py runserver 0.0.0.0:8000 &
           echo $! > server_pid.txt
-
+        continue-on-error: false
       - name: Wait for server to start
         run: |
           until curl -s http://localhost:8000/; do
@@ -68,12 +68,16 @@ jobs:
       - name: Install K6
         run: |
           sudo apt-get update
+          sudo apt-get install -y gnupg software-properties-common
+          curl -s https://dl.k6.io/key.gpg | sudo apt-key add -
+          echo "deb https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
           sudo apt-get install -y k6
-
+        continue-on-error: false
       - name: Run K6 tests
         run: |
           k6 run load_test.js --out json=load_test_results.json
-
+        continue-on-error: false
       - name: Upload K6 results
         uses: actions/upload-artifact@v4
         with:
