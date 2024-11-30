@@ -1,0 +1,97 @@
+name: Django CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    environment: env
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+        continue-on-error: false
+      
+      - name: Set env variables
+        run: |
+          echo "ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS }}" >> $GITHUB_ENV
+          echo "DEBUG=${{ secrets.DEBUG }}" >> $GITHUB_ENV
+          echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> $GITHUB_ENV
+          echo "LANGUAGE_CODE=${{ secrets.LANGUAGE_CODE }}" >> $GITHUB_ENV
+          echo "TIME_ZONE=${{ secrets.TIME_ZONE }}" >> $GITHUB_ENV
+
+      - name: Setup DB
+        run: |
+          python manage.py migrate --settings=lab4.settings
+        continue-on-error: false
+      
+      - name: Run tests
+        run: |
+          pytest --junitxml=test-results.xml
+        continue-on-error: false
+      
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results.xml
+
+      - name: Start test server
+        run: |
+          python manage.py runserver 0.0.0.0:8000 &
+          echo $! > server_pid.txt
+
+      - name: Wait for server to start
+        run: |
+          until curl -s http://localhost:8000/; do
+            echo "Waiting for server...";
+            sleep 5;
+          done
+          echo "Server is running"
+
+      - name: Install K6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Run K6 tests
+        run: |
+          k6 run load_test.js --out json=load_test_results.json
+
+      - name: Upload K6 results
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-results
+          path: load_test_results.json
+
+      - name: Stop Django server
+        if: always()
+        run: |
+          kill $(cat server_pid.txt)
+
+      
+      - name: Archive project
+        run: | 
+          zip -r project.zip . -x "**/__pycache__/*" "*.pyc" ".git/*" "**.pytest_cache/*" "*.sqlite3"
+      
+      - name: Upload project archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-archive
+          path: project.zip
